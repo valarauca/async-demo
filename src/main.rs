@@ -28,7 +28,7 @@ mod runtime;
 mod future_callback;
 use self::{
     runtime::callback::JOB_QUEUE_TRAPS,
-    runtime::incumbent_stack::{push_incumbent_stack, pop_incumbent_stack},
+    runtime::incumbent_stack::{enter_incumbent_stack},
     future_callback::tokio_sleep_ms,
 };
 
@@ -81,55 +81,40 @@ fn main() {
             )
         });
 
-
-        let mut realm = AutoRealm::new_from_handle(context, global.handle());
-        let (global_obj, realm) = realm.global_and_reborrow();
-        push_incumbent_stack(Heap::boxed(global_obj.get()));
+        enter_incumbent_stack(context, global.handle(), |realm,global_obj| {
+        //let mut realm = AutoRealm::new_from_handle(context, global.handle());
+        //let (global_obj, realm) = realm.global_and_reborrow();
+        //push_incumbent_stack(Heap::boxed(global_obj.get()));
         
-        unsafe {
-            InitRealmStandardClasses(realm);
-            JS_DefineFunction(
-                realm,
-                global_obj,
-                c"print_stuff".as_ptr(),
-                Some(print_stuff),
-                1,
-                0,
-            );
-            JS_DefineFunction(
-                realm,
-                global_obj,
-                c"sleep_ms".as_ptr(),
-                Some(tokio_sleep_ms),
-                1,
-                0,
-            );
-        }
+            unsafe {
+                InitRealmStandardClasses(realm);
+                JS_DefineFunction(realm,global_obj,c"print_stuff".as_ptr(),Some(print_stuff),1,0,);
+                JS_DefineFunction(realm,global_obj,c"sleep_ms".as_ptr(),Some(tokio_sleep_ms),1,0,);
+            }
 
-        let script = format!(r#"
-            let callCount = 0;
-            let myId = {};
-            
-            async function doWork() {{
-                for (let i = 0; i < 10; i++) {{
-                    // Random sleep between 25 and 2000 ms
-                    let sleepDuration = Math.floor(Math.random() * (2000 - 25 + 1)) + 25;
-                    let slept = await sleep_ms(sleepDuration);
-                    callCount++;
-                    let text = `promise id: '${{myId}}' call count: '${{callCount}}' I slept for '${{slept}}' ms`;
-                    print_stuff(text);
+            let script = format!(r#"
+                let callCount = 0;
+                let myId = {};
+                
+                async function doWork() {{
+                    for (let i = 0; i < 10; i++) {{
+                        // Random sleep between 25 and 2000 ms
+                        let sleepDuration = Math.floor(Math.random() * (2000 - 25 + 1)) + 25;
+                        let slept = await sleep_ms(sleepDuration);
+                        callCount++;
+                        let text = `promise id: '${{myId}}' call count: '${{callCount}}' I slept for '${{slept}}' ms`;
+                        print_stuff(text);
+                    }}
                 }}
-            }}
-            
-            doWork();
-        "#, realm_id);
+                
+                doWork();
+            "#, realm_id);
 
-        rooted!(&in(realm) let mut rval = UndefinedValue());
-        let options = mozjs::rust::CompileOptionsWrapper::new(realm, &format!("realm{}.js", realm_id), 0);
-        mozjs::rust::evaluate_script(realm, global_obj, &script, rval.handle_mut(), options)
+            rooted!(&in(realm) let mut rval = UndefinedValue());
+            let options = mozjs::rust::CompileOptionsWrapper::new(realm, &format!("realm{}.js", realm_id), 0);
+            mozjs::rust::evaluate_script(realm, global_obj, &script, rval.handle_mut(), options)
             .unwrap_or_else(|e| panic!("Failed to evaluate realm {}, {:?}", realm_id, e));
-
-        let _ = pop_incumbent_stack();
+        })
     }
 
     crate::runtime::checkpoint::runtime_checkpoint(context);

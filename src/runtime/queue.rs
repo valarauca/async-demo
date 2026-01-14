@@ -10,9 +10,11 @@ use mozjs::{
     context::{JSContext},
     jsapi::{Heap,JSObject},
     jsval::{UndefinedValue,ObjectValue},
+    gc::{Handle},
 };
+#[allow(unused_imports)] use tracing::{trace,debug,info,warn,error,instrument};
 
-use super::incumbent_stack::{push_incumbent_stack,pop_incumbent_stack};
+use super::incumbent_stack::{enter_incumbent_stack};
 
 thread_local! {
     static QUEUE: LazyCell<RefCell<VecDeque<Task>>> = LazyCell::new(|| RefCell::new(VecDeque::new()));
@@ -44,26 +46,30 @@ pub struct Task {
     obj: Box<Heap<*mut JSObject>>
 }
 impl Task {
+    #[instrument(skip_all)]
     pub fn call(self, ctx: &mut JSContext) {
-        push_incumbent_stack(Heap::boxed(self.obj.get()));
-        let mut realm = AutoRealm::new(ctx, NonNull::new(self.obj.get()).unwrap());
-        let (_globals, realm) = realm.global_and_reborrow();
-        rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let callback = ObjectValue(self.job.get()));
-        rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let mut rval = UndefinedValue());
-        let args = mozjs::jsapi::HandleValueArray {
-            length_: 0,
-            elements_: null(),
-        };
-        unsafe {
-            let _ = mozjs::jsapi::JS::Call(
-                realm.deref_mut().raw_cx(),
-                mozjs::gc::HandleValue::undefined().into(),
-                callback.handle().into(),
-                &args,
-                rval.handle_mut().into(),
-            );
-        }
-        pop_incumbent_stack();
+        rooted!(in(unsafe { ctx.raw_cx() }) let globals = self.obj.get());
+        enter_incumbent_stack(ctx, globals.handle(), |realm: &mut AutoRealm, _ :Handle<'_,*mut JSObject>| -> () {
+            //push_incumbent_stack(Heap::boxed(self.obj.get()));
+            //let mut realm = AutoRealm::new(ctx, NonNull::new(self.obj.get()).unwrap());
+            //let (_globals, realm) = realm.global_and_reborrow();
+            rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let callback = ObjectValue(self.job.get()));
+            rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let mut rval = UndefinedValue());
+            let args = mozjs::jsapi::HandleValueArray {
+                length_: 0,
+                elements_: null(),
+            };
+            unsafe {
+                let _ = mozjs::jsapi::JS::Call(
+                    realm.deref_mut().raw_cx(),
+                    mozjs::gc::HandleValue::undefined().into(),
+                    callback.handle().into(),
+                    &args,
+                    rval.handle_mut().into(),
+                );
+            }
+        });
+        //pop_incumbent_stack();
     }
 }
 

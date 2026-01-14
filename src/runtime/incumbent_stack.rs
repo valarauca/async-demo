@@ -1,9 +1,13 @@
 use std::{
+    ptr::{NonNull},
     cell::{LazyCell,RefCell},
 };
 use mozjs::{
-    gc::{MutableHandle},
+    context::{JSContext},
+    panic::{wrap_panic},
+    gc::{MutableHandle,Handle},
     jsapi::{Heap,JSObject},
+    realm::AutoRealm,
 };
 #[allow(unused_imports)] use tracing::{trace,debug,info,warn,error,instrument};
 
@@ -17,10 +21,9 @@ pub(crate) fn push_incumbent_stack(item: Box<Heap<*mut JSObject>>) {
         inner.borrow_mut().push(item);
     })
 }
-
 /// Pops an item from the incumbent stack
 #[instrument(skip_all)]
-pub(crate) fn pop_incumbent_stack() -> Option<Box<Heap<*mut JSObject>>> {
+fn pop_incumbent_stack() -> Option<Box<Heap<*mut JSObject>>> {
     INCUMBENT_STACK.with(|inner| {
         let out = inner.borrow_mut().pop();
         if out.is_none() {
@@ -43,5 +46,18 @@ pub(crate) fn peek_incumbent_stack(target: &mut MutableHandle<'_,*mut JSObject>)
             }
         };
     });
+}
+
+#[instrument(skip_all, name = "incubment stack frame")]
+pub fn enter_incumbent_stack<F,R>(ctx: &mut JSContext, globals: Handle<'_, *mut JSObject>, lambda: F) -> R
+where
+    F: FnOnce(&mut AutoRealm, Handle<'_,*mut JSObject>) -> R,
+{
+    push_incumbent_stack(Heap::boxed(globals.get()));
+    let mut realm = AutoRealm::new(ctx, NonNull::new(globals.get()).unwrap());
+    let mut out: Option<R> = None;
+    out = Some((lambda)(&mut realm, globals));
+    pop_incumbent_stack();
+    out.unwrap()
 }
 

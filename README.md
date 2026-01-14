@@ -5,4 +5,4 @@ Basic demostration of using rust-lang futures powered by a tokio executor to dri
 
 ## Status
 
-* Segfaults on exit 
+* Works but messy

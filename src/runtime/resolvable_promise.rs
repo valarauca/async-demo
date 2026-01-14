@@ -24,7 +24,7 @@ use mozjs::{
     gc::{Handle,MutableHandle},
 };
 
-use super::incumbent_stack::{push_incumbent_stack};
+use super::incumbent_stack::{enter_incumbent_stack};
 
 
 thread_local! {
@@ -81,21 +81,22 @@ pub fn poll_futures() -> Vec<(u64,ResolutionMarshalling)> {
 
 pub fn setup_to_resolve(ctx: &mut JSContext, id: u64, lambda: ResolutionMarshalling) {
     let data: InternalPromise = FAKE_PENDING_PROMISES.with(|f| f.borrow_mut().remove(&id).unwrap());
-    push_incumbent_stack(Heap::boxed(data.global.get()));
 
     rooted!(in(unsafe { ctx.raw_cx() }) let global = data.global.get());
     rooted!(in(unsafe { ctx.raw_cx() }) let promise = data.promise.get());
     rooted!(in(unsafe { ctx.raw_cx() }) let mut ok = UndefinedValue());
     rooted!(in(unsafe { ctx.raw_cx() }) let mut err = UndefinedValue());
-
-    let mut realm = AutoRealm::new(ctx, NonNull::new(global.handle().get()).unwrap());
-        let (global, realm) = realm.global_and_reborrow();
-    (lambda)(realm, promise.handle(), global, ok.handle_mut(), err.handle_mut());
-    if !err.is_undefined() {
-        unsafe { mozjs::rust::wrappers2::RejectPromise(realm, promise.handle(), err.handle()) };
-    } else {
-        unsafe { mozjs::rust::wrappers2::ResolvePromise(realm, promise.handle(), ok.handle()) };
-    }
+    
+    enter_incumbent_stack(ctx, global.handle(), |realm,global| {
+        //let mut realm = AutoRealm::new(ctx, NonNull::new(global.handle().get()).unwrap());
+        //let (global, realm) = realm.global_and_reborrow();
+        (lambda)(realm, promise.handle(), global, ok.handle_mut(), err.handle_mut());
+        if !err.is_undefined() {
+            unsafe { mozjs::rust::wrappers2::RejectPromise(realm, promise.handle(), err.handle()) };
+        } else {
+            unsafe { mozjs::rust::wrappers2::ResolvePromise(realm, promise.handle(), ok.handle()) };
+        }
+    });
 }
 
 
