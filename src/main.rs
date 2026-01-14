@@ -26,11 +26,11 @@ use mozjs::{
 use tracing_subscriber::FmtSubscriber;
 use tracing::{Level,info};
 mod runtime;
-mod future_shit;
+mod future_callback;
 use self::{
     runtime::callback::JOB_QUEUE_TRAPS,
     runtime::incumbent_stack::{push_incumbent_stack, pop_incumbent_stack},
-    future_shit::tokio_sleep_ms,
+    future_callback::tokio_sleep_ms,
 };
 
 fn main() {
