@@ -1,0 +1,70 @@
+use std::{
+    ptr::{NonNull,null},
+    cell::{RefCell,LazyCell},
+    ops::{DerefMut},
+    collections::VecDeque,
+    rc::{Rc},
+};
+use mozjs::{rooted};
+use mozjs::{
+    realm::{AutoRealm},
+    context::{JSContext},
+    jsapi::{Heap,JSObject},
+    jsval::{UndefinedValue,ObjectValue},
+};
+
+use super::incumbent_stack::{push_incumbent_stack,pop_incumbent_stack};
+
+thread_local! {
+    static QUEUE: LazyCell<RefCell<VecDeque<Task>>> = LazyCell::new(|| RefCell::new(VecDeque::new()));
+}
+
+/// Insert an item into the FIFO runtime queue
+pub fn insert_into_filo(job: Box<Heap<*mut JSObject>>, global: Rc<Box<Heap<*mut JSObject>>>) {
+    QUEUE.with(|q| {
+        q.borrow_mut().push_back(Task { job, obj: global });
+    });
+}
+
+/// Remoe a item into the FIFO runtime queue
+pub fn remove_from_filo() -> Option<Task> {
+    QUEUE.with(|q| {
+        q.borrow_mut().pop_front()
+    })
+}
+
+pub fn filo_empty() -> bool {
+    QUEUE.with(|q| {
+        q.borrow().is_empty()
+    })
+}
+
+/// Task contains everyting it needs to setup and run its job
+pub struct Task {
+    job: Box<Heap<*mut JSObject>>,
+    obj: Rc<Box<Heap<*mut JSObject>>>,
+}
+impl Task {
+    pub fn call(self, ctx: &mut JSContext) {
+        push_incumbent_stack(self.obj.clone());
+        let mut realm = AutoRealm::new(ctx, NonNull::new(self.obj.get()).unwrap());
+        let (_globals, realm) = realm.global_and_reborrow();
+        rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let callback = ObjectValue(self.job.get()));
+        rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let mut rval = UndefinedValue());
+        let args = mozjs::jsapi::HandleValueArray {
+            length_: 0,
+            elements_: null(),
+        };
+        unsafe {
+            let _ = mozjs::jsapi::JS::Call(
+                realm.deref_mut().raw_cx(),
+                mozjs::gc::HandleValue::undefined().into(),
+                callback.handle().into(),
+                &args,
+                rval.handle_mut().into(),
+            );
+        }
+        pop_incumbent_stack();
+    }
+}
+
