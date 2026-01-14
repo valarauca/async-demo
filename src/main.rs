@@ -1,6 +1,5 @@
 use std::{
     ptr,
-    rc::Rc,
     ptr::NonNull,
 };
 use mozjs::{
@@ -85,7 +84,7 @@ fn main() {
 
         let mut realm = AutoRealm::new_from_handle(context, global.handle());
         let (global_obj, realm) = realm.global_and_reborrow();
-        push_incumbent_stack(Rc::new(Heap::boxed(global_obj.get())));
+        push_incumbent_stack(Heap::boxed(global_obj.get()));
         
         unsafe {
             InitRealmStandardClasses(realm);

@@ -1,6 +1,6 @@
 use std::{
     ops::DerefMut,
-    ptr::{NonNull,null_mut},
+    ptr::{NonNull},
     rc::{Rc},
 };
 
@@ -16,7 +16,7 @@ use mozjs::{
 #[allow(unused_imports)]
 use tracing::{debug,trace,instrument,warn,error,info};
 
-use crate::runtime::resolvable_promise::{ResolutionMarshalling,Bridge,push_internal_promise,why_is_promise_id_segfaulting};
+use crate::runtime::resolvable_promise::{ResolutionMarshalling,Bridge,push_internal_promise};
 
 #[instrument(skip_all,name="tokio_sleep_entry_point")]
 pub unsafe extern "C" fn tokio_sleep_ms(
@@ -48,11 +48,12 @@ pub unsafe extern "C" fn tokio_sleep_ms(
                 error!("promise is null");
                 return;
             }
-            if !unsafe { mozjs::rust::wrappers2::IsPromiseObject(promise.handle()) } {
+            if !mozjs::rust::wrappers2::IsPromiseObject(promise.handle()) {
 				is_okay = false;
                 error!("promise is not a promise");
                 return;
             }
+
             let promise_id = mozjs::rust::wrappers2::GetPromiseID(promise.handle());
             args.rval().set(ObjectValue(promise.get()));
             promise_id

@@ -7,7 +7,6 @@ use std::{
     marker::{PhantomData},
     cell::{RefCell,LazyCell},
     collections::{BTreeMap},
-    sync::atomic::{AtomicU64,Ordering},
 };
 use tokio::{
     runtime::{Handle as TokioHandle},
@@ -29,14 +28,9 @@ use super::incumbent_stack::{push_incumbent_stack};
 
 
 thread_local! {
-    static IDFK: AtomicU64 = AtomicU64::new(0);
     static FAKE_PENDING_PROMISES: LazyCell<RefCell<BTreeMap<u64,InternalPromise>>> = LazyCell::new(|| RefCell::new(BTreeMap::new()));
     /// Ensures our promise handling is non-reentrant
     static PENDING: LazyCell<RefCell<FuturesUnordered<Pin<Box<dyn Future<Output=(u64,ResolutionMarshalling)> + 'static>>>>> = LazyCell::new(|| RefCell::new(FuturesUnordered::new()));
-}
-
-pub fn why_is_promise_id_segfaulting() -> u64 {
-    IDFK.with(|i| i.fetch_add(1,Ordering::Relaxed))
 }
 
 pub(crate) struct InternalPromise {
@@ -87,7 +81,7 @@ pub fn poll_futures() -> Vec<(u64,ResolutionMarshalling)> {
 
 pub fn setup_to_resolve(ctx: &mut JSContext, id: u64, lambda: ResolutionMarshalling) {
     let data: InternalPromise = FAKE_PENDING_PROMISES.with(|f| f.borrow_mut().remove(&id).unwrap());
-    push_incumbent_stack(data.global.clone());
+    push_incumbent_stack(Heap::boxed(data.global.get()));
 
     rooted!(in(unsafe { ctx.raw_cx() }) let global = data.global.get());
     rooted!(in(unsafe { ctx.raw_cx() }) let promise = data.promise.get());

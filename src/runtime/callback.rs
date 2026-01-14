@@ -1,7 +1,6 @@
 use std::{
-    ptr::{null,NonNull},
+    ptr::{null,NonNull,null_mut},
     ffi::{c_void},
-    rc::{Rc},
 };
 use mozjs::{rooted};
 use mozjs::{
@@ -22,6 +21,7 @@ use super::{
     queue::{insert_into_filo},
     checkpoint::{runtime_checkpoint,is_empty},
 };
+#[allow(unused_imports)] use tracing::{trace,debug,info,warn,error,instrument};
 
 /*
  * Define Callbacks & Global State
@@ -67,21 +67,24 @@ unsafe extern "C" fn get_host_defined_data(
 
     let mut is_okay = false;
     wrap_panic(&mut || {
-        let guard: Rc<Box<Heap<*mut JSObject>>> = match peek_incumbent_stack() {
-            None => {
-                rooted!(in(ctx) let current = unsafe { mozjs::jsapi::CurrentGlobalOrNull(ctx) });
-                if current.get().is_null() {
-                    eprintln!("no global is defined");
-                    is_okay = false;
-                }
-                Rc::new(Heap::boxed(current.get()))
-            },
-            Some(guard) => guard,
+        rooted!(in(ctx) let mut incumbent_stack = null_mut::<JSObject>());
+        peek_incumbent_stack(&mut incumbent_stack.handle_mut());
+        let guard = if incumbent_stack.get().is_null() {
+            warn!("incumbent stack has no items to peek");
+            rooted!(in(ctx) let current = unsafe { mozjs::jsapi::CurrentGlobalOrNull(ctx) });
+            if current.get().is_null() {
+                error!("incumbent stack has nothing and there is no current global");
+                is_okay = false;
+                return;
+            }
+            Heap::boxed(current.get())
+        } else {
+            Heap::boxed(incumbent_stack.get())
         };
         rooted!(in(ctx) let result = unsafe { mozjs::jsapi::JS_NewObject(ctx, &HOST_DEFINED_DATA_CLASS) });
         if result.get().is_null() {
             is_okay = false;
-            eprintln!("could not setup globals");
+            error!("could not setup globals");
             return;
         }
         rooted!(in(ctx) let out = ObjectValue(guard.get()));
@@ -113,7 +116,10 @@ unsafe extern "C" fn enqueue_promise_job(
         }
         if !host_data.is_undefined() && !host_data.is_null() && host_data.is_object() {
             rooted!(in(cx) let incumbent_obj = host_data.to_object());
-            insert_into_filo(Heap::boxed(job.get()), Rc::new(Heap::boxed(incumbent_obj.get())));
+            if incumbent_obj.get().is_null() {
+                warn!("incumbent stack item is null pointer");
+            }
+            insert_into_filo(Heap::boxed(job.get()), Heap::boxed(incumbent_obj.get()));
         }
     });
     true

@@ -3,7 +3,6 @@ use std::{
     cell::{RefCell,LazyCell},
     ops::{DerefMut},
     collections::VecDeque,
-    rc::{Rc},
 };
 use mozjs::{rooted};
 use mozjs::{
@@ -20,7 +19,7 @@ thread_local! {
 }
 
 /// Insert an item into the FIFO runtime queue
-pub fn insert_into_filo(job: Box<Heap<*mut JSObject>>, global: Rc<Box<Heap<*mut JSObject>>>) {
+pub fn insert_into_filo(job: Box<Heap<*mut JSObject>>, global: Box<Heap<*mut JSObject>>) {
     QUEUE.with(|q| {
         q.borrow_mut().push_back(Task { job, obj: global });
     });
@@ -42,11 +41,11 @@ pub fn filo_empty() -> bool {
 /// Task contains everyting it needs to setup and run its job
 pub struct Task {
     job: Box<Heap<*mut JSObject>>,
-    obj: Rc<Box<Heap<*mut JSObject>>>,
+    obj: Box<Heap<*mut JSObject>>
 }
 impl Task {
     pub fn call(self, ctx: &mut JSContext) {
-        push_incumbent_stack(self.obj.clone());
+        push_incumbent_stack(Heap::boxed(self.obj.get()));
         let mut realm = AutoRealm::new(ctx, NonNull::new(self.obj.get()).unwrap());
         let (_globals, realm) = realm.global_and_reborrow();
         rooted!(in(unsafe { realm.deref_mut().raw_cx() } ) let callback = ObjectValue(self.job.get()));

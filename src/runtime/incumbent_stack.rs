@@ -1,35 +1,47 @@
 use std::{
     cell::{LazyCell,RefCell},
-    rc::{Rc},
 };
-use mozjs::jsapi::{Heap,JSObject};
-
+use mozjs::{
+    gc::{MutableHandle},
+    jsapi::{Heap,JSObject},
+};
+#[allow(unused_imports)] use tracing::{trace,debug,info,warn,error,instrument};
 
 thread_local! {
-    static INCUMBENT_STACK: LazyCell<RefCell<Vec<Rc<Box<Heap<*mut JSObject>>>>>> = LazyCell::new(|| RefCell::new(Vec::new()));
+    static INCUMBENT_STACK: LazyCell<RefCell<Vec<Box<Heap<*mut JSObject>>>>> = LazyCell::new(|| RefCell::new(Vec::new()));
 }
 
 /// Pushes an item into the incumbent stack
-pub(crate) fn push_incumbent_stack<T>(item: T)
-where
-    Rc<Box<Heap<*mut JSObject>>>: From<T>,
-{
+pub(crate) fn push_incumbent_stack(item: Box<Heap<*mut JSObject>>) {
     INCUMBENT_STACK.with(|inner| {
-        inner.borrow_mut().push(Rc::from(item));
+        inner.borrow_mut().push(item);
     })
 }
 
 /// Pops an item from the incumbent stack
-pub(crate) fn pop_incumbent_stack() -> Option<Rc<Box<Heap<*mut JSObject>>>> {
+#[instrument(skip_all)]
+pub(crate) fn pop_incumbent_stack() -> Option<Box<Heap<*mut JSObject>>> {
     INCUMBENT_STACK.with(|inner| {
-        inner.borrow_mut().pop()
+        let out = inner.borrow_mut().pop();
+        if out.is_none() {
+            warn!("incumbent stack is empty");
+        }
+        out
     })
 }
 
 /// Peak at what is on the top of our stack
-pub(crate) fn peek_incumbent_stack() -> Option<Rc<Box<Heap<*mut JSObject>>>> {
+#[instrument(skip_all)]
+pub(crate) fn peek_incumbent_stack(target: &mut MutableHandle<'_,*mut JSObject>) {
     INCUMBENT_STACK.with(|inner| {
-        inner.borrow_mut().last().map(|x: &Rc<Box<Heap<*mut JSObject>>>| x.clone())
-    })
+        match inner.borrow_mut().last() {
+            None => {
+                error!("no incumbent stack is present");
+            }
+            Some(inner) => {
+                target.set(inner.get());
+            }
+        };
+    });
 }
 
